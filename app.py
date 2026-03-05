@@ -1,8 +1,25 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
+
 from Bio import Entrez
-import openai
+from openai import OpenAI
+
+import os
+
+
+# ------------------------------------
+# Initialize API clients
+# ------------------------------------
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+Entrez.email = "research@example.com"
+
+
+# ------------------------------------
+# FastAPI setup
+# ------------------------------------
 
 app = FastAPI()
 
@@ -14,12 +31,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-openai.api_key = "YOUR_OPENAI_API_KEY"
+
+# ------------------------------------
+# Request schema
+# ------------------------------------
 
 class Question(BaseModel):
     question: str
 
-Entrez.email = "research@example.com"
+
+# ------------------------------------
+# PubMed search function
+# ------------------------------------
 
 def search_pubmed(query):
 
@@ -53,23 +76,49 @@ def search_pubmed(query):
         if "Abstract" in article:
             abstract = " ".join(article["Abstract"]["AbstractText"])
 
-        papers.append(f"{title}\n{abstract}")
+        papers.append({
+            "title": title,
+            "abstract": abstract
+        })
 
     return papers
+
+
+# ------------------------------------
+# Chat endpoint
+# ------------------------------------
 
 @app.post("/")
 async def ask(q: Question):
 
     papers = search_pubmed(q.question)
 
-    context = "\n\n".join(papers)
+    if len(papers) == 0:
+        return {"answer": "No relevant PubMed papers found."}
 
-    response = openai.ChatCompletion.create(
+    context = ""
+
+    for p in papers:
+        context += f"{p['title']}\n{p['abstract']}\n\n"
+
+    response = client.chat.completions.create(
+
         model="gpt-4o-mini",
+
         messages=[
-            {"role": "system", "content": "You are an orthopedic research assistant summarizing PubMed literature."},
-            {"role": "user", "content": f"Answer this question using these papers:\n\n{context}\n\nQuestion: {q.question}"}
-        ]
+            {
+                "role": "system",
+                "content": "You are an orthopedic research assistant summarizing biomedical literature from PubMed."
+            },
+            {
+                "role": "user",
+                "content": f"Using the following PubMed abstracts, answer the question and summarize the literature. Cite key findings.\n\n{context}\n\nQuestion: {q.question}"
+            }
+        ],
+
+        temperature=0.3
     )
 
-    return {"answer": response.choices[0].message.content}
+    answer = response.choices[0].message.content
+
+    return {"answer": answer}
