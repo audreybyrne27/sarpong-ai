@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# Allow requests from your website
+# Allow requests from external websites (like GitHub Pages)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
