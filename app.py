@@ -1,9 +1,8 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-
 from Bio import Entrez
-import requests
+import openai
 
 app = FastAPI()
 
@@ -15,18 +14,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+openai.api_key = "YOUR_OPENAI_API_KEY"
+
 class Question(BaseModel):
     question: str
 
-# PubMed setup
-Entrez.email = "example@example.com"
+Entrez.email = "research@example.com"
 
-def fetch_publications():
+def search_pubmed(query):
 
     search = Entrez.esearch(
         db="pubmed",
-        term="Sarpong NO[Author]",
-        retmax=20
+        term=query,
+        retmax=5
     )
 
     record = Entrez.read(search)
@@ -53,32 +53,23 @@ def fetch_publications():
         if "Abstract" in article:
             abstract = " ".join(article["Abstract"]["AbstractText"])
 
-        papers.append({
-            "title": title,
-            "abstract": abstract
-        })
+        papers.append(f"{title}\n{abstract}")
 
     return papers
-
-papers = fetch_publications()
 
 @app.post("/")
 async def ask(q: Question):
 
-    question = q.question.lower()
+    papers = search_pubmed(q.question)
 
-    context = ""
+    context = "\n\n".join(papers)
 
-    for p in papers:
+    response = openai.ChatCompletion.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are an orthopedic research assistant summarizing PubMed literature."},
+            {"role": "user", "content": f"Answer this question using these papers:\n\n{context}\n\nQuestion: {q.question}"}
+        ]
+    )
 
-        if any(word in p["abstract"].lower() for word in question.split()):
-            context += p["title"] + "\n" + p["abstract"] + "\n\n"
-
-    if context == "":
-        return {
-            "answer": "No relevant publication found. Try a more specific question about hip or knee arthroplasty."
-        }
-
-    answer = f"Based on Dr. Sarpong's publications:\n\n{context[:800]}"
-
-    return {"answer": answer}
+    return {"answer": response.choices[0].message.content}
